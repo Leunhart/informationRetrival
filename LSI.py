@@ -1,22 +1,22 @@
+# libraries 
 import os
-from django.core.wsgi import get_wsgi_application
+# Django imports
+import django
 from django.urls import path
 from django.conf import settings
 from django.conf.urls.static import static
 from django.shortcuts import render
-from django.http import HttpResponse
 from django.core.files.storage import FileSystemStorage
 from django.forms import Form, FileField, CharField
+# nlp
 import nltk
 from nltk.corpus import stopwords
 from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
-from PyPDF2 import PdfReader
-from docx import Document
+# preprocessing
 import string
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.decomposition import TruncatedSVD
 from sklearn.metrics.pairwise import cosine_similarity
-import time
 from collections import Counter
 
 # Django settings
@@ -31,11 +31,11 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media', 'documents')
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 
-# Create required directories
-os.makedirs(MEDIA_ROOT, exist_ok=True)
-os.makedirs(STATIC_ROOT, exist_ok=True)
+# membuat direktori
+os.makedirs(MEDIA_ROOT, exist_ok=True) # file media
+os.makedirs(STATIC_ROOT, exist_ok=True) # file static
 
-# Configure Django
+# konfigurasi django
 settings.configure(
     DEBUG=DEBUG,
     SECRET_KEY=SECRET_KEY,
@@ -82,16 +82,19 @@ settings.configure(
     BASE_DIR=BASE_DIR
 )
 
-import django
+# inisialisasi setup django
 django.setup()
 
 # Text processing setup
 nltk.download('stopwords')
 nltk.download('punkt')
 stop_words = set(stopwords.words('indonesian'))
+
+# konfigurasi stemming sastrawi
 factory = StemmerFactory()
 stemmer = factory.create_stemmer()
 
+# processing text (tokenizations, stopwords, stemming)
 def preprocess_text(text):
     text = text.lower()
     tokens = nltk.word_tokenize(text.translate(str.maketrans('', '', string.punctuation)))
@@ -99,10 +102,11 @@ def preprocess_text(text):
     word_count = Counter(stemmed_tokens)
     return ' '.join(stemmed_tokens), len(stemmed_tokens), word_count
 
+# baca jenis file
 def read_file(file):
     content = ""
     try:
-        if isinstance(file, str):  # If file is a path
+        if isinstance(file, str):  # jika string -> file path
             if file.endswith('.txt'):
                 with open(file, 'r', encoding='utf-8') as f:
                     content = f.read()
@@ -116,7 +120,7 @@ def read_file(file):
                 content = "\n".join([p.text for p in doc.paragraphs])
             else:
                 raise ValueError("Unsupported file type.")
-        else:  # If file is a file object
+        else:  # jika bukan file path -> objek
             if file.name.endswith('.txt'):
                 content = file.read().decode('utf-8')
             elif file.name.endswith('.pdf'):
@@ -133,18 +137,20 @@ def read_file(file):
         content = f"Error reading file: {e}"
     return content
 
-# Forms
+# formulir input file
 class UploadForm(Form):
     file = FileField()
 
+# form search file
 class SearchForm(Form):
     query = CharField()
 
-# Views
+# menampilkan file yg tersedia
 def get_available_files():
     files = [f for f in os.listdir(MEDIA_ROOT) if os.path.isfile(os.path.join(MEDIA_ROOT, f))]
     return files
 
+# menampilkan conten dokumen 
 def view_document(request, doc_name):
     doc_name = os.path.basename(doc_name)
     file_content = os.path.join(MEDIA_ROOT, doc_name)
@@ -155,17 +161,20 @@ def view_document(request, doc_name):
     word_count = 0
     stemming_content = []
     
-    # read content file
+    # membaca isi dokumen
     document_content = read_file(file_content)
     
+    # membaca jumlah kata (stemming)
     if os.path.exists(count_path):
         with open(count_path, 'r', encoding='utf-8') as f:
             word_count = int(f.read())
     
+    # membaca content stemming
     if os.path.exists(stemming_path):
         with open(stemming_path, 'r', encoding='utf-8') as f:
             stemming_content = f.readlines()
     
+    # menampilkan/return hasil
     return render(request, 'document_view.html', {
         'document_content': document_content,
         'doc_name': doc_name,
@@ -173,19 +182,23 @@ def view_document(request, doc_name):
         'stemming_content': stemming_content,
     })
 
+# fungsi untuk menyimpan file yang di upload
 def upload_view(request):
     available_files = get_available_files()
-
+    
+    # user mengupload file
     if request.method == 'POST':
         form = UploadForm(request.POST, request.FILES)
         if form.is_valid():
             file = request.FILES['file']
             fs = FileSystemStorage()
             fs.save(file.name, file)
-
+            
+            # baca dan proses kontent
             content = read_file(file)
             processed_content, word_count, word_count_dict = preprocess_text(content)
-
+            
+            # menyimpan hasil proses teks, jumlh, stemming
             with open(os.path.join(MEDIA_ROOT, f"{file.name}.processed"), 'w', encoding='utf-8') as f:
                 f.write(processed_content)
 
@@ -197,14 +210,17 @@ def upload_view(request):
                     original_words = [token for token in nltk.word_tokenize(content) if stemmer.stem(token.lower()) == word]
                     original_words_str = ', '.join(original_words)
                     f.write(f"Kata Dasar: {word} ({count} kali) -> Asli: {original_words_str}\n")
-
+            
+            # menampilkan file berhasil di upload
             return render(request, 'upload.html', {'form': UploadForm(), 'message': 'File uploaded successfully!', 'available_files': available_files})
-
+    # halaman upload file (form) kosong 
     return render(request, 'upload.html', {'form': UploadForm(), 'available_files': available_files})
 
+# proses pencarian 
 def search_view(request):
     available_files = get_available_files()
-
+    
+    # user kirim query pencarian
     if request.method == 'POST':
         form = SearchForm(request.POST)
         if form.is_valid():
@@ -214,24 +230,27 @@ def search_view(request):
                 if filename.endswith('.processed'):
                     with open(os.path.join(MEDIA_ROOT, filename), 'r', encoding='utf-8') as f:
                         documents[filename.replace('.processed', '')] = f.read()
-
+            
+            # proses dokumen
             if documents:
-                vectorizer = TfidfVectorizer()
+                vectorizer = TfidfVectorizer() # hitung TF-IDF
                 tfidf_matrix = vectorizer.fit_transform(documents.values())
                 svd = TruncatedSVD(n_components=min(100, tfidf_matrix.shape[1]-1), random_state=42)
                 lsi_matrix = svd.fit_transform(tfidf_matrix)
                 
+                # mencocokan query dgn dokumen
                 query_processed, _, _ = preprocess_text(query)
                 query_tfidf = vectorizer.transform([query_processed])
                 query_lsi = svd.transform(query_tfidf)
                 
+                # menghitung similiarity
                 similarities = cosine_similarity(query_lsi, lsi_matrix)[0]
                 results = sorted(zip(documents.keys(), similarities), key=lambda x: x[1], reverse=True)
                 return render(request, 'search.html', {'form': form, 'results': results, 'available_files': available_files})
     
     return render(request, 'search.html', {'form': SearchForm(), 'available_files': available_files})
 
-# URLs
+# django urls
 urlpatterns = [
     path('', upload_view, name='upload'),
     path('search/', search_view, name='search'),
@@ -344,7 +363,7 @@ DOCUMENT_VIEW_TEMPLATE = '''
 </html>
 '''
 
-# Create templates directory and files
+# membuat template dir dan files
 os.makedirs(os.path.join(BASE_DIR, 'templates'), exist_ok=True)
 os.makedirs(MEDIA_ROOT, exist_ok=True)
 
