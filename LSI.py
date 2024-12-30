@@ -9,7 +9,7 @@ from django.core.files.storage import FileSystemStorage
 from django.forms import Form, FileField, CharField
 import nltk
 from nltk.corpus import stopwords
-from nltk.stem import PorterStemmer
+from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
 from PyPDF2 import PdfReader
 from docx import Document
 import string
@@ -89,7 +89,8 @@ django.setup()
 nltk.download('stopwords')
 nltk.download('punkt')
 stop_words = set(stopwords.words('indonesian'))
-stemmer = PorterStemmer()
+factory = StemmerFactory()
+stemmer = factory.create_stemmer()
 
 def preprocess_text(text):
     text = text.lower()
@@ -101,19 +102,35 @@ def preprocess_text(text):
 def read_file(file):
     content = ""
     try:
-        if file.name.endswith('.txt'):
-            content = file.read().decode('utf-8')
-        elif file.name.endswith('.pdf'):
-            reader = PdfReader(file)
-            for page in reader.pages:
-                content += page.extract_text()
-        elif file.name.endswith('.docx'):
-            doc = Document(file)
-            content = "\n".join([p.text for p in doc.paragraphs])
-        else:
-            raise ValueError("Unsupported file type.")
+        if isinstance(file, str):  # If file is a path
+            if file.endswith('.txt'):
+                with open(file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            elif file.endswith('.pdf'):
+                from PyPDF2 import PdfReader
+                reader = PdfReader(file)
+                content = "".join([page.extract_text() for page in reader.pages])
+            elif file.endswith('.docx'):
+                from docx import Document
+                doc = Document(file)
+                content = "\n".join([p.text for p in doc.paragraphs])
+            else:
+                raise ValueError("Unsupported file type.")
+        else:  # If file is a file object
+            if file.name.endswith('.txt'):
+                content = file.read().decode('utf-8')
+            elif file.name.endswith('.pdf'):
+                from PyPDF2 import PdfReader
+                reader = PdfReader(file)
+                content = "".join([page.extract_text() for page in reader.pages])
+            elif file.name.endswith('.docx'):
+                from docx import Document
+                doc = Document(file)
+                content = "\n".join([p.text for p in doc.paragraphs])
+            else:
+                raise ValueError("Unsupported file type.")
     except Exception as e:
-        print(f"Error reading file {file.name}: {e}")
+        content = f"Error reading file: {e}"
     return content
 
 # Forms
@@ -130,16 +147,16 @@ def get_available_files():
 
 def view_document(request, doc_name):
     doc_name = os.path.basename(doc_name)
-    file_path = os.path.join(MEDIA_ROOT, f"{doc_name}.processed")
+    file_content = os.path.join(MEDIA_ROOT, doc_name)
+    # file_path = os.path.join(MEDIA_ROOT, f"{doc_name}.processed")
     count_path = os.path.join(MEDIA_ROOT, f"{doc_name}.count")
     stemming_path = os.path.join(MEDIA_ROOT, f"{doc_name}.stemming")
     document_content = ""
     word_count = 0
     stemming_content = []
-
-    if os.path.exists(file_path):
-        with open(file_path, 'r', encoding='utf-8') as f:
-            document_content = f.read()
+    
+    # read content file
+    document_content = read_file(file_content)
     
     if os.path.exists(count_path):
         with open(count_path, 'r', encoding='utf-8') as f:
@@ -292,32 +309,36 @@ DOCUMENT_VIEW_TEMPLATE = '''
 </head>
 <body class="bg-gray-100">
     <div class="container mx-auto px-12 py-24">
-        <div class="max-w-md mx-auto bg-white rounded-xl shadow-md overflow-hidden p-8">
-            <h2 class="text-2xl font-bold mb-4">{{ doc_name }} - Document Content</h2>
-            
-            <div class="mb-4 p-4 border border-gray-300 rounded-lg bg-gray-50">
-                <h3 class="text-lg font-semibold">Word Count (Stemmed):</h3>
-                <p class="text-gray-700">{{ word_count }}</p>
-            </div>
+        <div class="flex space-x-4"> <!-- Flex container for side by side layout -->
+            <!-- Left Block -->
+            <div class="w-1/2 bg-white rounded-xl shadow-md overflow-hidden p-8">
+                <h2 class="text-2xl font-bold mb-4">{{ doc_name }} - Document Content</h2>
+                
+                <div class="mb-4 p-4 border border-gray-300 rounded-lg bg-gray-50">
+                    <h3 class="text-lg font-semibold">Word Count (Stemmed):</h3>
+                    <p class="text-gray-700">{{ word_count }}</p>
+                </div>
 
-            <div class="mb-4 p-4 border border-gray-300 rounded-lg bg-gray-50">
-                 <h3 class="text-lg font-semibold">Stemmed Words:</h3>
-                <div class="bg-gray-100 p-4 rounded">
-                    <ul>
-                        {% for line in stemming_content %}
-                        <li class="text-gray-700">{{ line }}</li>
-                        {% endfor %}
-                    </ul>
+                <div class="mb-4 p-4 border border-gray-300 rounded-lg bg-gray-50">
+                    <h3 class="text-lg font-semibold">Stemmed Words:</h3>
+                    <div class="bg-gray-100 p-4 rounded">
+                        <ul>
+                            {% for line in stemming_content %}
+                            <li class="text-gray-700">{{ line }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
                 </div>
             </div>
 
-            <div class="mt-4">
+            <!-- Right Block -->
+            <div class="w-1/2 bg-white rounded-xl shadow-md overflow-hidden p-8">
                 <h3 class="text-lg font-semibold">Document Content:</h3>
                 <p class="text-gray-700">{{ document_content }}</p>
             </div>
-
-            <a href="/search" class="mt-4 inline-block text-blue-500">Back to Search</a>
         </div>
+
+        <a href="/search" class="mt-4 inline-block text-blue-500">Back to Search</a>
     </div>
 </body>
 </html>
